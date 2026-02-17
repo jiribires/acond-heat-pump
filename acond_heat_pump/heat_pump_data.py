@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 from acond_heat_pump.constants import HeatPumpMode, RegulationMode
 
@@ -26,41 +27,41 @@ class HeatPumpResponse:
     Data class representing the response from the heat pump unit.
     """
 
-    indoor1_temp_set: float
+    indoor1_temp_set: Optional[float]
     """Desired indoor temperature, circuit 1 [°C]"""
-    indoor1_temp_actual: float
+    indoor1_temp_actual: Optional[float]
     """Actual indoor temperature, circuit 1 [°C]"""
-    indoor2_temp_set: float
+    indoor2_temp_set: Optional[float]
     """Desired indoor temperature, circuit 2 [°C]"""
-    indoor2_temp_actual: float
+    indoor2_temp_actual: Optional[float]
     """Actual indoor temperature, circuit 2 [°C]"""
-    dhw_temp_set: float
+    dhw_temp_set: Optional[float]
     """Desired domestic hot water temperature [°C]"""
-    dhw_temp_actual: float
+    dhw_temp_actual: Optional[float]
     """Actual domestic hot water temperature [°C]"""
     status: HeatPumpStatus
     """Heat pump status"""
-    water_back_temp_set: float
+    water_back_temp_set: Optional[float]
     """Desired return water temperature [°C]"""
-    water_back_temp_actual: float
+    water_back_temp_actual: Optional[float]
     """Actual return water temperature [°C]"""
-    outdoor_temp_actual: float
+    outdoor_temp_actual: Optional[float]
     """Actual outdoor temperature [°C]"""
-    solar_temp_actual: float
+    solar_temp_actual: Optional[float]
     """Solar temperature [°C]"""
-    pool_temp_actual: float
+    pool_temp_actual: Optional[float]
     """Pool temperature [°C]"""
     pool_temp_set: float
     """Desired pool temperature [°C]"""
     heat_pump_mode: HeatPumpMode
     regulation_mode: RegulationMode
-    brine_temp: float
+    brine_temp: Optional[float]
     """Brine temperature at the outlet from collector [°C]"""
     heart_beat: int
     """Communication verification counter"""
-    water_outlet_temp_actual: float
+    water_outlet_temp_actual: Optional[float]
     """Actual water outlet temperature [°C]"""
-    water_outlet_temp_set: float
+    water_outlet_temp_set: Optional[float]
     """Desired water outlet temperature for cooling [°C]"""
     compressor_capacity_max: int
     """Max heat pump capacity [W]. Only for PRO units"""

@@ -4,11 +4,10 @@ from pymodbus.client.tcp import ModbusTcpClient
 import logging
 
 from acond_heat_pump.constants import RegulationMode, HeatPumpMode
+from acond_heat_pump.exceptions import HeatPumpConnectionError
 from acond_heat_pump.heat_pump_data import HeatPumpStatus, HeatPumpResponse
 
-logging.basicConfig()
-log = logging.getLogger()
-log.setLevel(logging.DEBUG)
+log = logging.getLogger(__name__)
 
 
 class AcondHeatPump:
@@ -31,11 +30,11 @@ class AcondHeatPump:
         """
         self.client = ModbusTcpClient(host, port=port)
 
-    def connect(self):
+    def connect(self) -> bool:
         """
         Connect to the heat pump.
         """
-        self.client.connect()
+        return self.client.connect()
 
     def close(self):
         """
@@ -55,10 +54,10 @@ class AcondHeatPump:
         """
 
         # Reading 24 registers from 30001 to 30024
-        result = self.client.read_input_registers(0, 24)
+        result = self.client.read_input_registers(0, 24, slave=1)
         if result.isError():
             log.error("Error reading input registers")
-            raise Exception("Error reading input registers")
+            raise HeatPumpConnectionError("Error reading input registers")
 
         return HeatPumpResponse(
             indoor1_temp_set=self._read_temp_register(
@@ -74,7 +73,7 @@ class AcondHeatPump:
                 result.registers[3], min=0.0, max=50.0
             ),
             dhw_temp_set=self._read_temp_register(
-                result.registers[4], min=10.0, max=50.0
+                result.registers[4], min=10.0, max=46.0
             ),
             dhw_temp_actual=self._read_temp_register(
                 result.registers[5], min=0.0, max=90.0
@@ -138,7 +137,7 @@ class AcondHeatPump:
             raise ValueError("Temperature must be between 10.0 and 30.0 °C")
 
         # Scale the temperature by 10 for the Modbus register
-        scaled_temperature = int(temperature * 10)
+        scaled_temperature = round(temperature * 10)
 
         # Write to the register
         result = self.client.write_register(
@@ -156,16 +155,16 @@ class AcondHeatPump:
         Set the desired domestic hot water temperature.
 
         Parameters:
-        - temperature (float): The temperature to set in °C. Must be between 10.0 and 50.0 °C.
+        - temperature (float): The temperature to set in °C. Must be between 10.0 and 46.0 °C.
 
         Returns:
         - bool: True if the temperature was set successfully, False otherwise.
         """
-        if not 10.0 <= temperature <= 50.0:
-            raise ValueError("Temperature must be between 10.0 and 50.0 °C")
+        if not 10.0 <= temperature <= 46.0:
+            raise ValueError("Temperature must be between 10.0 and 46.0 °C")
 
         # Scale the temperature by 10 for the Modbus register
-        scaled_temperature = int(temperature * 10)
+        scaled_temperature = round(temperature * 10)
 
         # Write to the register
         result = self.client.write_register(4, scaled_temperature, slave=1)
@@ -174,6 +173,7 @@ class AcondHeatPump:
             return True
         else:
             log.info("Failed to set domestic hot water temperature")
+            return False
 
     def set_regulation_mode(self, mode: RegulationMode) -> bool:
         """
@@ -193,48 +193,57 @@ class AcondHeatPump:
             log.info("Failed to set regulation mode")
             return False
 
-    def _update_bit(self, value: int, bit_position: int, set_bit: bool) -> int:
-        """Set or clear a specific bit in an integer value."""
-        return
+    # Bit position in TC_set register for each heat pump mode
+    _MODE_BIT_POSITION = {
+        HeatPumpMode.AUTOMATIC: 0,
+        HeatPumpMode.HEAT_PUMP_ONLY: 1,
+        HeatPumpMode.BIVALENT_ONLY: 2,
+        HeatPumpMode.OFF: 3,
+        HeatPumpMode.COOLING: 4,
+        HeatPumpMode.MANUAL: 5,
+    }
 
-    def change_setting(self, mode: Optional[HeatPumpMode] = None) -> bool:
+    # Bitmask covering all mode bits (bits 0–5)
+    _MODE_BITS_MASK = sum(1 << pos for pos in _MODE_BIT_POSITION.values())
+
+    def change_setting(self, mode: HeatPumpMode) -> bool:
+        """
+        Set the heat pump operating mode by writing to the TC_set register.
+
+        Only one mode bit (bits 0–5) is set at a time; non-mode bits are preserved.
+
+        Parameters:
+        - mode (HeatPumpMode): The operating mode to set.
+
+        Returns:
+        - bool: True if the mode was set successfully, False otherwise.
+        """
         register_address = 5  # Modbus address for TC_set (40006)
 
         # Read the current value of TC_set register
-        current_value = self.client.read_holding_registers(
+        result = self.client.read_holding_registers(
             register_address, count=1, slave=1
         )
-        if current_value is None:
-            print("Error: Failed to read TC_set register.")
+        if result.isError():
+            log.error("Failed to read TC_set register")
             return False
-        current_value = current_value.registers[0]
 
-        # Define bit positions for each flag
-        flag_bits = [
-            mode == HeatPumpMode.AUTOMATIC,
-            mode == HeatPumpMode.HEAT_PUMP_ONLY,
-            mode == HeatPumpMode.BIVALENT_ONLY,
-            mode == HeatPumpMode.OFF,
-            mode == HeatPumpMode.COOLING,
-        ]
+        current_value = result.registers[0]
 
-        # Update current_value based on flags that are not None
-        bit_value = current_value
-        for bit_position, flag in enumerate(flag_bits):
-            if flag is not None:
-                bit_value = (
-                    bit_value | (1 << bit_position)
-                    if flag
-                    else bit_value & ~(1 << bit_position)
-                )
+        # Clear all mode bits, then set the one for the requested mode
+        bit_value = (current_value & ~self._MODE_BITS_MASK) | (
+            1 << self._MODE_BIT_POSITION[mode]
+        )
 
         # Write the updated value to the TC_set register
-        result = self.client.write_register(register_address, bit_value, slave=1)
-        if result.isError():
-            print("Error: Failed to update TC_set register.")
+        write_result = self.client.write_register(
+            register_address, bit_value, slave=1
+        )
+        if write_result.isError():
+            log.error("Failed to update TC_set register")
             return False
 
-        print("Success: TC_set register flags updated.")
+        log.info(f"Heat pump mode set to {mode.name}")
         return True
 
     def set_water_back_temperature(self, temperature: float) -> bool:
@@ -242,16 +251,16 @@ class AcondHeatPump:
         Set the desired return water temperature.
 
         Parameters:
-        - temperature (float): The temperature to set in °C. Must be between 20.0 and 60.0 °C.
+        - temperature (float): The temperature to set in °C. Must be between 10.0 and 65.0 °C.
 
         Returns:
         - bool: True if the temperature was set successfully, False otherwise.
         """
-        if not 20.0 <= temperature <= 60.0:
-            raise ValueError("Temperature must be between 20.0 and 60.0 °C")
+        if not 10.0 <= temperature <= 65.0:
+            raise ValueError("Temperature must be between 10.0 and 65.0 °C")
 
         # Scale the temperature by 10 for the Modbus register
-        scaled_temperature = int(temperature * 10)
+        scaled_temperature = round(temperature * 10)
 
         # Write to the register
         result = self.client.write_register(7, scaled_temperature, slave=1)
@@ -267,16 +276,16 @@ class AcondHeatPump:
         Set the desired pool water temperature.
 
         Parameters:
-        - temperature (float): The temperature to set in °C. Must be between 0.0 and 50.0 °C.
+        - temperature (float): The temperature to set in °C. Must be between 10.0 and 50.0 °C.
 
         Returns:
         - bool: True if the temperature was set successfully, False otherwise.
         """
-        if not 0.0 <= temperature <= 50.0:
-            raise ValueError("Temperature must be between 0.0 and 50.0 °C")
+        if not 10.0 <= temperature <= 50.0:
+            raise ValueError("Temperature must be between 10.0 and 50.0 °C")
 
         # Scale the temperature by 10 for the Modbus register
-        scaled_temperature = int(temperature * 10)
+        scaled_temperature = round(temperature * 10)
 
         # Write to the register
         result = self.client.write_register(11, scaled_temperature, slave=1)
@@ -301,7 +310,7 @@ class AcondHeatPump:
             raise ValueError("Temperature must be between 15.0 and 30.0 °C")
 
         # Scale the temperature by 10 for the Modbus register
-        scaled_temperature = int(temperature * 10)
+        scaled_temperature = round(temperature * 10)
 
         # Write to the register
         result = self.client.write_register(12, scaled_temperature, slave=1)
@@ -322,9 +331,9 @@ class AcondHeatPump:
         signed = int.from_bytes(int(value).to_bytes(length=2), signed=True)
         temp = signed / 10.0
         if min is not None and temp < min:
-            return 0
+            return None
         if max is not None and temp > max:
-            return 0
+            return None
         return temp
 
     @staticmethod
