@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.0] - 2026-02-17
+
+### Added
+- `set_summer_mode(summer: bool)` method to enable/disable summer mode via TC_set register bit 8
+
 ## [1.1.0] - 2026-02-17
 
 ### Added

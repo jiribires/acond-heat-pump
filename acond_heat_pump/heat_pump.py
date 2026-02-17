@@ -206,6 +206,9 @@ class AcondHeatPump:
     # Bitmask covering all mode bits (bits 0–5)
     _MODE_BITS_MASK = sum(1 << pos for pos in _MODE_BIT_POSITION.values())
 
+    # Bit position in TC_set register for summer mode
+    _SUMMER_MODE_BIT = 8
+
     def change_setting(self, mode: HeatPumpMode) -> bool:
         """
         Set the heat pump operating mode by writing to the TC_set register.
@@ -244,6 +247,45 @@ class AcondHeatPump:
             return False
 
         log.info(f"Heat pump mode set to {mode.name}")
+        return True
+
+    def set_summer_mode(self, summer: bool) -> bool:
+        """
+        Set or clear summer mode by writing to the TC_set register.
+
+        Parameters:
+        - summer (bool): True to enable summer mode, False to disable.
+
+        Returns:
+        - bool: True if the mode was set successfully, False otherwise.
+        """
+        register_address = 5  # Modbus address for TC_set (40006)
+
+        # Read the current value of TC_set register
+        result = self.client.read_holding_registers(
+            register_address, count=1, slave=1
+        )
+        if result.isError():
+            log.error("Failed to read TC_set register")
+            return False
+
+        current_value = result.registers[0]
+
+        # Set or clear the summer mode bit
+        if summer:
+            bit_value = current_value | (1 << self._SUMMER_MODE_BIT)
+        else:
+            bit_value = current_value & ~(1 << self._SUMMER_MODE_BIT)
+
+        # Write the updated value to the TC_set register
+        write_result = self.client.write_register(
+            register_address, bit_value, slave=1
+        )
+        if write_result.isError():
+            log.error("Failed to update TC_set register")
+            return False
+
+        log.info(f"Summer mode {'enabled' if summer else 'disabled'}")
         return True
 
     def set_water_back_temperature(self, temperature: float) -> bool:

@@ -289,6 +289,66 @@ class TestAcondHeatPump(unittest.TestCase):
         self.assertFalse(status.brine_pump)
         self.assertTrue(status.cooling_running)    # bit 12
 
+    # --- set_summer_mode tests ---
+
+    def test_set_summer_mode_on(self):
+        mock_read = MagicMock()
+        mock_read.isError.return_value = False
+        mock_read.registers = [0b000001]  # AUTOMATIC set, summer off
+        self.mock_client.read_holding_registers.return_value = mock_read
+        self.mock_client.write_register.return_value.isError.return_value = False
+
+        result = self.heat_pump.set_summer_mode(True)
+        self.assertTrue(result)
+        # Bit 8 set, AUTOMATIC preserved
+        expected = 0b000001 | (1 << 8)
+        self.mock_client.write_register.assert_called_with(5, expected, slave=1)
+
+    def test_set_summer_mode_off(self):
+        mock_read = MagicMock()
+        mock_read.isError.return_value = False
+        mock_read.registers = [0b000001 | (1 << 8)]  # AUTOMATIC + summer on
+        self.mock_client.read_holding_registers.return_value = mock_read
+        self.mock_client.write_register.return_value.isError.return_value = False
+
+        result = self.heat_pump.set_summer_mode(False)
+        self.assertTrue(result)
+        # Bit 8 cleared, AUTOMATIC preserved
+        self.mock_client.write_register.assert_called_with(5, 0b000001, slave=1)
+
+    def test_set_summer_mode_preserves_other_bits(self):
+        mock_read = MagicMock()
+        mock_read.isError.return_value = False
+        # Bits 0 (AUTOMATIC) + 7 (some non-mode bit) + 10 (another bit)
+        mock_read.registers = [0b10010000001]
+        self.mock_client.read_holding_registers.return_value = mock_read
+        self.mock_client.write_register.return_value.isError.return_value = False
+
+        result = self.heat_pump.set_summer_mode(True)
+        self.assertTrue(result)
+        # Bit 8 set, all other bits preserved
+        expected = 0b10110000001
+        self.mock_client.write_register.assert_called_with(5, expected, slave=1)
+
+    def test_set_summer_mode_read_error(self):
+        mock_read = MagicMock()
+        mock_read.isError.return_value = True
+        self.mock_client.read_holding_registers.return_value = mock_read
+
+        result = self.heat_pump.set_summer_mode(True)
+        self.assertFalse(result)
+        self.mock_client.write_register.assert_not_called()
+
+    def test_set_summer_mode_write_error(self):
+        mock_read = MagicMock()
+        mock_read.isError.return_value = False
+        mock_read.registers = [0]
+        self.mock_client.read_holding_registers.return_value = mock_read
+        self.mock_client.write_register.return_value.isError.return_value = True
+
+        result = self.heat_pump.set_summer_mode(True)
+        self.assertFalse(result)
+
     def test_read_temp_register_at_boundary(self):
         # Exactly at min → returns value (not None)
         result = AcondHeatPump._read_temp_register(100, min=10.0, max=30.0)
