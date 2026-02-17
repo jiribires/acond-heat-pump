@@ -3,6 +3,8 @@
 A unofficial python library to interface with an Acond heat pump
 using the Modbus TCP protocol.
 
+Acond Modbus is described in [Loxone Library Acond integration](https://api.library.loxone.com/downloader/file/1231/Acond_ModbusTCP%20sw%20xxx.41%20-%20ENG.pdf).
+
 ### ❗Warning❗
 Library is tested only with Acond PRO N heat pump as I don't have access to other models.
 If you have a different model and you want to test it, please let me know the results.
