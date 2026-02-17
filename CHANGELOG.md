@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1] - 2026-02-17
+
+### Fixed
+- Replace deprecated `slave` parameter with `device_id` for pymodbus >= 3.8 compatibility
+- Fix `read_input_registers` positional `count` argument (now keyword-only in pymodbus)
+- Bump minimum pymodbus version to `^3.8.0`
+
 ## [1.2.0] - 2026-02-17
 
 ### Added
@@ -19,7 +26,7 @@
 - Temperature fields in `HeatPumpResponse` typed as `Optional[float]`
 - Temperature scaling uses `round()` instead of `int()` for correct rounding
 - Logger uses `getLogger(__name__)` instead of root logger with `basicConfig()`
-- `read_input_registers` call now passes `slave=1`
+- `read_input_registers` call now passes `device_id=1`
 
 ### Fixed
 - DHW temperature range corrected to 10.0–46.0 °C (was 10.0–50.0)

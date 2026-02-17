@@ -99,39 +99,39 @@ class TestAcondHeatPump(unittest.TestCase):
         self.mock_client.write_register.return_value.isError.return_value = False
         result = self.heat_pump.set_indoor_temperature(25.0, circuit=1)
         self.assertTrue(result)
-        self.mock_client.write_register.assert_called_with(0, 250, slave=1)
+        self.mock_client.write_register.assert_called_with(0, 250, device_id=1)
 
     def test_set_dhw_temperature(self):
         self.mock_client.write_register.return_value.isError.return_value = False
         result = self.heat_pump.set_dhw_temperature(45.0)
         self.assertTrue(result)
-        self.mock_client.write_register.assert_called_with(4, 450, slave=1)
+        self.mock_client.write_register.assert_called_with(4, 450, device_id=1)
 
     def test_set_regulation_mode(self):
         self.mock_client.write_register.return_value.isError.return_value = False
         result = self.heat_pump.set_regulation_mode(RegulationMode.MANUAL)
         self.assertTrue(result)
         self.mock_client.write_register.assert_called_with(
-            6, RegulationMode.MANUAL.value, slave=1
+            6, RegulationMode.MANUAL.value, device_id=1
         )
 
     def test_set_water_back_temperature(self):
         self.mock_client.write_register.return_value.isError.return_value = False
         result = self.heat_pump.set_water_back_temperature(35.0)
         self.assertTrue(result)
-        self.mock_client.write_register.assert_called_with(7, 350, slave=1)
+        self.mock_client.write_register.assert_called_with(7, 350, device_id=1)
 
     def test_set_pool_temperature(self):
         self.mock_client.write_register.return_value.isError.return_value = False
         result = self.heat_pump.set_pool_temperature(28.0)
         self.assertTrue(result)
-        self.mock_client.write_register.assert_called_with(11, 280, slave=1)
+        self.mock_client.write_register.assert_called_with(11, 280, device_id=1)
 
     def test_set_water_cool_temperature(self):
         self.mock_client.write_register.return_value.isError.return_value = False
         result = self.heat_pump.set_water_cool_temperature(20.0)
         self.assertTrue(result)
-        self.mock_client.write_register.assert_called_with(12, 200, slave=1)
+        self.mock_client.write_register.assert_called_with(12, 200, device_id=1)
 
 
     # --- change_setting tests ---
@@ -146,7 +146,7 @@ class TestAcondHeatPump(unittest.TestCase):
         result = self.heat_pump.change_setting(HeatPumpMode.AUTOMATIC)
         self.assertTrue(result)
         # AUTOMATIC = bit 0 → value 0b000001 = 1
-        self.mock_client.write_register.assert_called_with(5, 0b000001, slave=1)
+        self.mock_client.write_register.assert_called_with(5, 0b000001, device_id=1)
 
     def test_change_setting_off(self):
         mock_read = MagicMock()
@@ -158,7 +158,7 @@ class TestAcondHeatPump(unittest.TestCase):
         result = self.heat_pump.change_setting(HeatPumpMode.OFF)
         self.assertTrue(result)
         # OFF = bit 3 → value 0b001000 = 8, AUTOMATIC bit cleared
-        self.mock_client.write_register.assert_called_with(5, 0b001000, slave=1)
+        self.mock_client.write_register.assert_called_with(5, 0b001000, device_id=1)
 
     def test_change_setting_preserves_non_mode_bits(self):
         mock_read = MagicMock()
@@ -172,7 +172,7 @@ class TestAcondHeatPump(unittest.TestCase):
         self.assertTrue(result)
         # COOLING = bit 4, non-mode bits preserved
         expected = 0b11000000_00010000
-        self.mock_client.write_register.assert_called_with(5, expected, slave=1)
+        self.mock_client.write_register.assert_called_with(5, expected, device_id=1)
 
     def test_change_setting_manual(self):
         mock_read = MagicMock()
@@ -184,7 +184,7 @@ class TestAcondHeatPump(unittest.TestCase):
         result = self.heat_pump.change_setting(HeatPumpMode.MANUAL)
         self.assertTrue(result)
         # MANUAL = bit 5 → value 0b100000 = 32
-        self.mock_client.write_register.assert_called_with(5, 0b100000, slave=1)
+        self.mock_client.write_register.assert_called_with(5, 0b100000, device_id=1)
 
     def test_change_setting_read_error(self):
         mock_read = MagicMock()
@@ -244,13 +244,13 @@ class TestAcondHeatPump(unittest.TestCase):
         self.mock_client.write_register.return_value.isError.return_value = False
         self.heat_pump.set_indoor_temperature(20.55, circuit=1)
         # 20.55 * 10 = 205.5 → round() = 206, not int() = 205
-        self.mock_client.write_register.assert_called_with(0, 206, slave=1)
+        self.mock_client.write_register.assert_called_with(0, 206, device_id=1)
 
     def test_set_indoor_temperature_circuit2(self):
         self.mock_client.write_register.return_value.isError.return_value = False
         result = self.heat_pump.set_indoor_temperature(22.0, circuit=2)
         self.assertTrue(result)
-        self.mock_client.write_register.assert_called_with(2, 220, slave=1)
+        self.mock_client.write_register.assert_called_with(2, 220, device_id=1)
 
     # --- read_data additional coverage ---
 
@@ -261,7 +261,7 @@ class TestAcondHeatPump(unittest.TestCase):
         self.mock_client.read_input_registers.return_value = mock_result
 
         self.heat_pump.read_data()
-        self.mock_client.read_input_registers.assert_called_once_with(0, 24, slave=1)
+        self.mock_client.read_input_registers.assert_called_once_with(0, count=24, device_id=1)
 
     def test_read_data_status_bits_varied(self):
         """Verify field-to-bit mapping with bits 3,6,9,12 set (0x1248)."""
@@ -302,7 +302,7 @@ class TestAcondHeatPump(unittest.TestCase):
         self.assertTrue(result)
         # Bit 8 set, AUTOMATIC preserved
         expected = 0b000001 | (1 << 8)
-        self.mock_client.write_register.assert_called_with(5, expected, slave=1)
+        self.mock_client.write_register.assert_called_with(5, expected, device_id=1)
 
     def test_set_summer_mode_off(self):
         mock_read = MagicMock()
@@ -314,7 +314,7 @@ class TestAcondHeatPump(unittest.TestCase):
         result = self.heat_pump.set_summer_mode(False)
         self.assertTrue(result)
         # Bit 8 cleared, AUTOMATIC preserved
-        self.mock_client.write_register.assert_called_with(5, 0b000001, slave=1)
+        self.mock_client.write_register.assert_called_with(5, 0b000001, device_id=1)
 
     def test_set_summer_mode_preserves_other_bits(self):
         mock_read = MagicMock()
@@ -328,7 +328,7 @@ class TestAcondHeatPump(unittest.TestCase):
         self.assertTrue(result)
         # Bit 8 set, all other bits preserved
         expected = 0b10110000001
-        self.mock_client.write_register.assert_called_with(5, expected, slave=1)
+        self.mock_client.write_register.assert_called_with(5, expected, device_id=1)
 
     def test_set_summer_mode_read_error(self):
         mock_read = MagicMock()

@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "acond-heat-pump"
-version = "1.2.0"
+version = "1.2.1"
 description = "A unofficial python library to interface with an Acond heat pump using the Modbus TCP protocol."
 authors = ["Jiří Bireš"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.12"
-pymodbus = "^3.7.4"
+pymodbus = "^3.8.0"
 
 
 [build-system]

@@ -54,7 +54,7 @@ class AcondHeatPump:
         """
 
         # Reading 24 registers from 30001 to 30024
-        result = self.client.read_input_registers(0, 24, slave=1)
+        result = self.client.read_input_registers(0, count=24, device_id=1)
         if result.isError():
             log.error("Error reading input registers")
             raise HeatPumpConnectionError("Error reading input registers")
@@ -141,7 +141,7 @@ class AcondHeatPump:
 
         # Write to the register
         result = self.client.write_register(
-            register_address, scaled_temperature, slave=1
+            register_address, scaled_temperature, device_id=1
         )
         if not result.isError():
             log.info(f"Temperature for circuit {circuit} set to {temperature} °C")
@@ -167,7 +167,7 @@ class AcondHeatPump:
         scaled_temperature = round(temperature * 10)
 
         # Write to the register
-        result = self.client.write_register(4, scaled_temperature, slave=1)
+        result = self.client.write_register(4, scaled_temperature, device_id=1)
         if not result.isError():
             log.info(f"Domestic hot water temperature set to {temperature} °C")
             return True
@@ -185,7 +185,7 @@ class AcondHeatPump:
         Returns:
         - bool: True if the mode was set successfully, False otherwise.
         """
-        result = self.client.write_register(6, mode.value, slave=1)
+        result = self.client.write_register(6, mode.value, device_id=1)
         if not result.isError():
             log.info(f"Regulation mode set to {mode.name}")
             return True
@@ -225,7 +225,7 @@ class AcondHeatPump:
 
         # Read the current value of TC_set register
         result = self.client.read_holding_registers(
-            register_address, count=1, slave=1
+            register_address, count=1, device_id=1
         )
         if result.isError():
             log.error("Failed to read TC_set register")
@@ -240,7 +240,7 @@ class AcondHeatPump:
 
         # Write the updated value to the TC_set register
         write_result = self.client.write_register(
-            register_address, bit_value, slave=1
+            register_address, bit_value, device_id=1
         )
         if write_result.isError():
             log.error("Failed to update TC_set register")
@@ -263,7 +263,7 @@ class AcondHeatPump:
 
         # Read the current value of TC_set register
         result = self.client.read_holding_registers(
-            register_address, count=1, slave=1
+            register_address, count=1, device_id=1
         )
         if result.isError():
             log.error("Failed to read TC_set register")
@@ -279,7 +279,7 @@ class AcondHeatPump:
 
         # Write the updated value to the TC_set register
         write_result = self.client.write_register(
-            register_address, bit_value, slave=1
+            register_address, bit_value, device_id=1
         )
         if write_result.isError():
             log.error("Failed to update TC_set register")
@@ -305,7 +305,7 @@ class AcondHeatPump:
         scaled_temperature = round(temperature * 10)
 
         # Write to the register
-        result = self.client.write_register(7, scaled_temperature, slave=1)
+        result = self.client.write_register(7, scaled_temperature, device_id=1)
         if not result.isError():
             log.info(f"Return water temperature set to {temperature} °C")
             return True
@@ -330,7 +330,7 @@ class AcondHeatPump:
         scaled_temperature = round(temperature * 10)
 
         # Write to the register
-        result = self.client.write_register(11, scaled_temperature, slave=1)
+        result = self.client.write_register(11, scaled_temperature, device_id=1)
         if not result.isError():
             log.info(f"Pool water temperature set to {temperature} °C")
             return True
@@ -355,7 +355,7 @@ class AcondHeatPump:
         scaled_temperature = round(temperature * 10)
 
         # Write to the register
-        result = self.client.write_register(12, scaled_temperature, slave=1)
+        result = self.client.write_register(12, scaled_temperature, device_id=1)
         if not result.isError():
             log.info(f"Water cool temperature set to {temperature} °C")
             return True
