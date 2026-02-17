@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.2.2] - 2026-02-17
+
+### Fixed
+- DHW temperature range corrected to 10.0–50.0 °C (read and write) — was 10.0–46.0
+
 ## [1.2.1] - 2026-02-17
 
 ### Fixed

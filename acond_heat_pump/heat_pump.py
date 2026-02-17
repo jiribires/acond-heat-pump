@@ -73,7 +73,7 @@ class AcondHeatPump:
                 result.registers[3], min=0.0, max=50.0
             ),
             dhw_temp_set=self._read_temp_register(
-                result.registers[4], min=10.0, max=46.0
+                result.registers[4], min=10.0, max=50.0
             ),
             dhw_temp_actual=self._read_temp_register(
                 result.registers[5], min=0.0, max=90.0
@@ -155,13 +155,13 @@ class AcondHeatPump:
         Set the desired domestic hot water temperature.
 
         Parameters:
-        - temperature (float): The temperature to set in °C. Must be between 10.0 and 46.0 °C.
+        - temperature (float): The temperature to set in °C. Must be between 10.0 and 50.0 °C.
 
         Returns:
         - bool: True if the temperature was set successfully, False otherwise.
         """
-        if not 10.0 <= temperature <= 46.0:
-            raise ValueError("Temperature must be between 10.0 and 46.0 °C")
+        if not 10.0 <= temperature <= 50.0:
+            raise ValueError("Temperature must be between 10.0 and 50.0 °C")
 
         # Scale the temperature by 10 for the Modbus register
         scaled_temperature = round(temperature * 10)
