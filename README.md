@@ -16,7 +16,7 @@ If you have a different model and you want to test it, please let me know the re
 ```python
 from acond_heat_pump import AcondHeatPump
 
-heat_pump = AcondHeatPump('192.168.1.16')
+heat_pump = AcondHeatPump('192.168.1.16')  # optional port=502
 heat_pump.connect()
 ```
 
@@ -44,6 +44,7 @@ from acond_heat_pump import RegulationMode, HeatPumpMode
 
 heat_pump.set_regulation_mode(RegulationMode.MANUAL)
 heat_pump.change_setting(mode=HeatPumpMode.AUTOMATIC)
+heat_pump.set_summer_mode(True)
 ```
 
 ### Closing the Connection
@@ -54,10 +55,8 @@ heat_pump.close()
 
 ## Running Tests
 
-Run the unit tests using `unittest`:
-
 ```sh
-python -m unittest discover tests
+python -m pytest tests/ -v
 ```
 
 ## License
