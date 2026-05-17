@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.3.0] - 2026-05-17
+
+### Fixed
+- `set_summer_mode()` no longer silently fails. TC_set bit 8 is an edge-triggered command (rising 0→1), not a state mirror, so the previous "set or clear bit 8 to match desired state" logic produced no edge when bit 8 already matched the requested value — the method returned `True` while the pump never switched. The new implementation pulses bit 8 (clear, then set) to generate a fresh rising edge, polls TC_status bit 10 to confirm the switch, and returns `True` only after the controller actually changed mode. Returns `False` with a warning log on timeout or any Modbus error.
+- `change_setting(HeatPumpMode.MANUAL)` now raises `ValueError`. Per the Acond Modbus spec, TC_set bit 5 is fault acknowledgement, not a mode bit — the previous code was silently firing a fault-ack pulse when callers requested manual mode. Manual mode exists only as a read value in `rezim_pan` (input 30014).
+- `change_setting()` no longer clears bit 5 (fault-ack) as a side effect of any mode change. `_MODE_BITS_MASK` now covers bits 0–4 only.
+
+### Added
+- `set_summer_mode(summer, timeout=5.0, poll_interval=0.2)` — new optional kwargs to tune how long to wait for TC_status to reflect the change.
+- `scripts/diag_summer_mode.py` — diagnostic CLI for inspecting TC_set / TC_status bits and verifying summer-mode behavior against a live pump.
+
 ## [1.2.2] - 2026-02-17
 
 ### Fixed

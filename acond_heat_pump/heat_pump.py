@@ -1,4 +1,5 @@
 from typing import Optional
+import time
 
 from pymodbus.client.tcp import ModbusTcpClient
 import logging
@@ -193,27 +194,39 @@ class AcondHeatPump:
             log.info("Failed to set regulation mode")
             return False
 
-    # Bit position in TC_set register for each heat pump mode
+    # Bit position in TC_set register for each heat pump mode.
+    # HeatPumpMode.MANUAL is intentionally absent: per the Acond Modbus spec,
+    # TC_set bit 5 is "fault acknowledgement", not a mode bit. Manual mode
+    # exists only as a read value in rezim_pan (input 30014).
     _MODE_BIT_POSITION = {
         HeatPumpMode.AUTOMATIC: 0,
         HeatPumpMode.HEAT_PUMP_ONLY: 1,
         HeatPumpMode.BIVALENT_ONLY: 2,
         HeatPumpMode.OFF: 3,
         HeatPumpMode.COOLING: 4,
-        HeatPumpMode.MANUAL: 5,
     }
 
-    # Bitmask covering all mode bits (bits 0–5)
+    # Bitmask covering all mode bits (bits 0–4).
     _MODE_BITS_MASK = sum(1 << pos for pos in _MODE_BIT_POSITION.values())
 
     # Bit position in TC_set register for summer mode
     _SUMMER_MODE_BIT = 8
 
+    # TC_status (input register 30007 / offset 6), bit 10 = summer operation
+    _STATUS_REGISTER = 6
+    _SUMMER_STATUS_BIT = 10
+
     def change_setting(self, mode: HeatPumpMode) -> bool:
         """
         Set the heat pump operating mode by writing to the TC_set register.
 
-        Only one mode bit (bits 0–5) is set at a time; non-mode bits are preserved.
+        Only one mode bit (bits 0–4) is set at a time; non-mode bits
+        (including bit 5 fault-ack, bits 6–7 solar/pool, bit 8 summer) are
+        preserved.
+
+        HeatPumpMode.MANUAL is not settable via Modbus per the Acond spec —
+        it appears only as a read value in rezim_pan. Passing it raises
+        ValueError.
 
         Parameters:
         - mode (HeatPumpMode): The operating mode to set.
@@ -221,9 +234,15 @@ class AcondHeatPump:
         Returns:
         - bool: True if the mode was set successfully, False otherwise.
         """
+        if mode not in self._MODE_BIT_POSITION:
+            settable = ", ".join(m.name for m in self._MODE_BIT_POSITION)
+            raise ValueError(
+                f"{mode.name} is not settable via TC_set. "
+                f"Settable modes: {settable}."
+            )
+
         register_address = 5  # Modbus address for TC_set (40006)
 
-        # Read the current value of TC_set register
         result = self.client.read_holding_registers(
             register_address, count=1, device_id=1
         )
@@ -249,19 +268,49 @@ class AcondHeatPump:
         log.info(f"Heat pump mode set to {mode.name}")
         return True
 
-    def set_summer_mode(self, summer: bool) -> bool:
+    def set_summer_mode(
+        self,
+        summer: bool,
+        timeout: float = 5.0,
+        poll_interval: float = 0.2,
+    ) -> bool:
         """
-        Set or clear summer mode by writing to the TC_set register.
+        Switch the heat pump between summer and winter mode.
+
+        TC_set bit 8 ("summer/winter switching", holding 40006) is an
+        edge-triggered command, not a state mirror: only a rising edge
+        (0 → 1) tells the controller to switch. Its value in TC_set does
+        not correspond to the current mode — that lives in TC_status bit 10
+        (input 30007). This method pulses bit 8 (clear, then set) to
+        generate a fresh rising edge, then polls TC_status to confirm.
 
         Parameters:
-        - summer (bool): True to enable summer mode, False to disable.
+        - summer (bool): True for summer, False for winter.
+        - timeout (float): Max seconds to wait for TC_status to reflect the
+          requested state.
+        - poll_interval (float): Seconds between status polls.
 
         Returns:
-        - bool: True if the mode was set successfully, False otherwise.
+        - bool: True if TC_status reached the requested state within timeout
+          (including the no-op case where it was already there), False on
+          any Modbus error or if the controller did not switch.
         """
         register_address = 5  # Modbus address for TC_set (40006)
 
-        # Read the current value of TC_set register
+        # No-op fast path: don't touch the bus if we're already in the
+        # requested state. Avoids generating spurious edges on the pump.
+        status = self.client.read_input_registers(
+            self._STATUS_REGISTER, count=1, device_id=1
+        )
+        if status.isError():
+            log.error("Failed to read TC_status register")
+            return False
+        if bool(status.registers[0] & (1 << self._SUMMER_STATUS_BIT)) == summer:
+            log.info(
+                f"Summer mode already {'enabled' if summer else 'disabled'}"
+            )
+            return True
+
         result = self.client.read_holding_registers(
             register_address, count=1, device_id=1
         )
@@ -270,23 +319,45 @@ class AcondHeatPump:
             return False
 
         current_value = result.registers[0]
+        cleared = current_value & ~(1 << self._SUMMER_MODE_BIT)
+        asserted = cleared | (1 << self._SUMMER_MODE_BIT)
 
-        # Set or clear the summer mode bit
-        if summer:
-            bit_value = current_value | (1 << self._SUMMER_MODE_BIT)
-        else:
-            bit_value = current_value & ~(1 << self._SUMMER_MODE_BIT)
-
-        # Write the updated value to the TC_set register
-        write_result = self.client.write_register(
-            register_address, bit_value, device_id=1
-        )
-        if write_result.isError():
-            log.error("Failed to update TC_set register")
+        # Pulse: clear bit 8 first so the next write is always a fresh
+        # rising edge, regardless of whether bit 8 was already set from a
+        # prior switch.
+        if self.client.write_register(
+            register_address, cleared, device_id=1
+        ).isError():
+            log.error("Failed to clear TC_set bit 8")
+            return False
+        if self.client.write_register(
+            register_address, asserted, device_id=1
+        ).isError():
+            log.error("Failed to assert TC_set bit 8")
             return False
 
-        log.info(f"Summer mode {'enabled' if summer else 'disabled'}")
-        return True
+        deadline = time.monotonic() + timeout
+        while True:
+            status = self.client.read_input_registers(
+                self._STATUS_REGISTER, count=1, device_id=1
+            )
+            if not status.isError():
+                actual = bool(
+                    status.registers[0] & (1 << self._SUMMER_STATUS_BIT)
+                )
+                if actual == summer:
+                    log.info(
+                        f"Summer mode {'enabled' if summer else 'disabled'}"
+                    )
+                    return True
+            if time.monotonic() >= deadline:
+                log.warning(
+                    f"TC_set bit 8 pulsed but TC_status bit "
+                    f"{self._SUMMER_STATUS_BIT} did not reach {summer} "
+                    f"within {timeout}s"
+                )
+                return False
+            time.sleep(poll_interval)
 
     def set_water_back_temperature(self, temperature: float) -> bool:
         """

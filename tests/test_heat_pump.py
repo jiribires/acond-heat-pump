@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 
 from acond_heat_pump import AcondHeatPump
 from acond_heat_pump import HeatPumpMode
@@ -163,28 +163,25 @@ class TestAcondHeatPump(unittest.TestCase):
     def test_change_setting_preserves_non_mode_bits(self):
         mock_read = MagicMock()
         mock_read.isError.return_value = False
-        # Bits 6+ are non-mode bits that should be preserved
-        mock_read.registers = [0b11000000_00000001]  # bits 6,7 set + AUTOMATIC
+        # Bits 5 (fault-ack), 6 (solar), 7 (pool), 8 (summer) are non-mode bits
+        # that should all be preserved across a mode change.
+        mock_read.registers = [0b1_11100001]  # bits 5,6,7,8 + AUTOMATIC
         self.mock_client.read_holding_registers.return_value = mock_read
         self.mock_client.write_register.return_value.isError.return_value = False
 
         result = self.heat_pump.change_setting(HeatPumpMode.COOLING)
         self.assertTrue(result)
-        # COOLING = bit 4, non-mode bits preserved
-        expected = 0b11000000_00010000
+        # COOLING = bit 4. Bits 5,6,7,8 preserved, AUTOMATIC (bit 0) cleared.
+        expected = 0b1_11110000
         self.mock_client.write_register.assert_called_with(5, expected, device_id=1)
 
-    def test_change_setting_manual(self):
-        mock_read = MagicMock()
-        mock_read.isError.return_value = False
-        mock_read.registers = [0]
-        self.mock_client.read_holding_registers.return_value = mock_read
-        self.mock_client.write_register.return_value.isError.return_value = False
-
-        result = self.heat_pump.change_setting(HeatPumpMode.MANUAL)
-        self.assertTrue(result)
-        # MANUAL = bit 5 → value 0b100000 = 32
-        self.mock_client.write_register.assert_called_with(5, 0b100000, device_id=1)
+    def test_change_setting_manual_raises(self):
+        """MANUAL is not writable via TC_set per the Acond spec (bit 5 is
+        fault-ack, not a mode bit). Should raise without touching the bus."""
+        with self.assertRaises(ValueError):
+            self.heat_pump.change_setting(HeatPumpMode.MANUAL)
+        self.mock_client.read_holding_registers.assert_not_called()
+        self.mock_client.write_register.assert_not_called()
 
     def test_change_setting_read_error(self):
         mock_read = MagicMock()
@@ -291,63 +288,161 @@ class TestAcondHeatPump(unittest.TestCase):
 
     # --- set_summer_mode tests ---
 
-    def test_set_summer_mode_on(self):
-        mock_read = MagicMock()
-        mock_read.isError.return_value = False
-        mock_read.registers = [0b000001]  # AUTOMATIC set, summer off
-        self.mock_client.read_holding_registers.return_value = mock_read
+    @staticmethod
+    def _mock_status(summer: bool):
+        """Build a mock input-register read with TC_status bit 10 reflecting summer."""
+        mock = MagicMock()
+        mock.isError.return_value = False
+        mock.registers = [(1 << 10) if summer else 0]
+        return mock
+
+    def _setup_summer_test(self, current_status: bool, tc_set: int, poll_results=None):
+        """
+        Wire up mocks for a set_summer_mode call.
+
+        - current_status: TC_status bit 10 before the pre-check.
+        - tc_set: TC_set value the holding-register read returns.
+        - poll_results: list of TC_status bit 10 values returned by post-write
+          polls (defaults to a single `not current_status` to flip immediately).
+        """
+        if poll_results is None:
+            poll_results = [not current_status]
+        self.mock_client.read_input_registers.side_effect = [
+            self._mock_status(current_status),  # pre-check
+            *(self._mock_status(v) for v in poll_results),  # polls after pulse
+        ]
+        holding = MagicMock()
+        holding.isError.return_value = False
+        holding.registers = [tc_set]
+        self.mock_client.read_holding_registers.return_value = holding
         self.mock_client.write_register.return_value.isError.return_value = False
+
+    def test_set_summer_mode_on_pulses_bit_8(self):
+        # Currently winter, want summer. TC_set has only HP mode bit (1) set.
+        self._setup_summer_test(current_status=False, tc_set=0b000010)
 
         result = self.heat_pump.set_summer_mode(True)
         self.assertTrue(result)
-        # Bit 8 set, AUTOMATIC preserved
-        expected = 0b000001 | (1 << 8)
-        self.mock_client.write_register.assert_called_with(5, expected, device_id=1)
 
-    def test_set_summer_mode_off(self):
-        mock_read = MagicMock()
-        mock_read.isError.return_value = False
-        mock_read.registers = [0b000001 | (1 << 8)]  # AUTOMATIC + summer on
-        self.mock_client.read_holding_registers.return_value = mock_read
-        self.mock_client.write_register.return_value.isError.return_value = False
+        # Pulse: clear bit 8, then set it. Other bits preserved.
+        self.assertEqual(
+            self.mock_client.write_register.call_args_list,
+            [
+                call(5, 0b000010, device_id=1),  # clear (bit 8 was already 0)
+                call(5, 0b000010 | (1 << 8), device_id=1),  # rising edge
+            ],
+        )
+
+    def test_set_summer_mode_off_pulses_bit_8(self):
+        # Currently summer, want winter. Symmetric: same pulse regardless of direction.
+        self._setup_summer_test(
+            current_status=True, tc_set=0b000010 | (1 << 8)
+        )
 
         result = self.heat_pump.set_summer_mode(False)
         self.assertTrue(result)
-        # Bit 8 cleared, AUTOMATIC preserved
-        self.mock_client.write_register.assert_called_with(5, 0b000001, device_id=1)
+
+        self.assertEqual(
+            self.mock_client.write_register.call_args_list,
+            [
+                call(5, 0b000010, device_id=1),  # clear leftover bit 8 from prior switch
+                call(5, 0b000010 | (1 << 8), device_id=1),  # fresh rising edge
+            ],
+        )
 
     def test_set_summer_mode_preserves_other_bits(self):
-        mock_read = MagicMock()
-        mock_read.isError.return_value = False
-        # Bits 0 (AUTOMATIC) + 7 (some non-mode bit) + 10 (another bit)
-        mock_read.registers = [0b10010000001]
-        self.mock_client.read_holding_registers.return_value = mock_read
-        self.mock_client.write_register.return_value.isError.return_value = False
+        # Bits 1 (HP mode) + 6 + 7 + 10 set in TC_set; bit 8 currently off.
+        tc_set = 0b10011000010
+        self._setup_summer_test(current_status=False, tc_set=tc_set)
 
         result = self.heat_pump.set_summer_mode(True)
         self.assertTrue(result)
-        # Bit 8 set, all other bits preserved
-        expected = 0b10110000001
-        self.mock_client.write_register.assert_called_with(5, expected, device_id=1)
 
-    def test_set_summer_mode_read_error(self):
-        mock_read = MagicMock()
-        mock_read.isError.return_value = True
-        self.mock_client.read_holding_registers.return_value = mock_read
+        cleared = tc_set & ~(1 << 8)
+        asserted = cleared | (1 << 8)
+        self.assertEqual(
+            self.mock_client.write_register.call_args_list,
+            [call(5, cleared, device_id=1), call(5, asserted, device_id=1)],
+        )
+
+    def test_set_summer_mode_already_in_state_is_noop(self):
+        # Already in summer, requesting summer → no writes, no holding read.
+        self.mock_client.read_input_registers.return_value = self._mock_status(True)
+
+        result = self.heat_pump.set_summer_mode(True)
+        self.assertTrue(result)
+        self.mock_client.read_holding_registers.assert_not_called()
+        self.mock_client.write_register.assert_not_called()
+
+    def test_set_summer_mode_status_read_error(self):
+        # Pre-check status read fails → bail before any write.
+        bad = MagicMock()
+        bad.isError.return_value = True
+        self.mock_client.read_input_registers.return_value = bad
+
+        result = self.heat_pump.set_summer_mode(True)
+        self.assertFalse(result)
+        self.mock_client.read_holding_registers.assert_not_called()
+        self.mock_client.write_register.assert_not_called()
+
+    def test_set_summer_mode_tc_set_read_error(self):
+        # Status mismatched → proceed; but TC_set read fails → bail before write.
+        self.mock_client.read_input_registers.return_value = self._mock_status(False)
+        bad = MagicMock()
+        bad.isError.return_value = True
+        self.mock_client.read_holding_registers.return_value = bad
 
         result = self.heat_pump.set_summer_mode(True)
         self.assertFalse(result)
         self.mock_client.write_register.assert_not_called()
 
-    def test_set_summer_mode_write_error(self):
-        mock_read = MagicMock()
-        mock_read.isError.return_value = False
-        mock_read.registers = [0]
-        self.mock_client.read_holding_registers.return_value = mock_read
+    def test_set_summer_mode_clear_write_error(self):
+        # First (clear) write fails → no second write, returns False.
+        self.mock_client.read_input_registers.return_value = self._mock_status(False)
+        holding = MagicMock()
+        holding.isError.return_value = False
+        holding.registers = [0]
+        self.mock_client.read_holding_registers.return_value = holding
         self.mock_client.write_register.return_value.isError.return_value = True
 
         result = self.heat_pump.set_summer_mode(True)
         self.assertFalse(result)
+        # Only one write attempted before bailing
+        self.assertEqual(self.mock_client.write_register.call_count, 1)
+
+    @patch("acond_heat_pump.heat_pump.time.sleep")
+    def test_set_summer_mode_status_does_not_propagate(self, _mock_sleep):
+        # Pulse succeeds but status never flips → False after timeout.
+        # Use return_value (not side_effect) so unlimited polls all see False.
+        self.mock_client.read_input_registers.return_value = self._mock_status(False)
+        holding = MagicMock()
+        holding.isError.return_value = False
+        holding.registers = [0]
+        self.mock_client.read_holding_registers.return_value = holding
+        self.mock_client.write_register.return_value.isError.return_value = False
+
+        result = self.heat_pump.set_summer_mode(
+            True, timeout=0.1, poll_interval=0.01
+        )
+        self.assertFalse(result)
+        # At least pre-check + a couple of polls
+        self.assertGreater(self.mock_client.read_input_registers.call_count, 2)
+
+    @patch("acond_heat_pump.heat_pump.time.sleep")
+    def test_set_summer_mode_status_propagates_after_delay(self, _mock_sleep):
+        # Status flips on the third poll.
+        self._setup_summer_test(
+            current_status=False,
+            tc_set=0,
+            poll_results=[False, False, True],
+        )
+
+        result = self.heat_pump.set_summer_mode(
+            True, timeout=5.0, poll_interval=0.01
+        )
+        self.assertTrue(result)
+        # 1 pre-check + 3 polls = 4
+        self.assertEqual(self.mock_client.read_input_registers.call_count, 4)
 
     def test_read_temp_register_at_boundary(self):
         # Exactly at min → returns value (not None)
